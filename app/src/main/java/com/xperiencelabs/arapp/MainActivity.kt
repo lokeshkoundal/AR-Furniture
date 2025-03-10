@@ -1,89 +1,94 @@
 package com.xperiencelabs.arapp
 
-import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
-import android.net.Uri
-import android.opengl.Visibility
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
-import androidx.core.content.ContentProviderCompat.requireContext
-import androidx.core.view.isGone
+import android.util.Log
+import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.ar.core.Config
+import com.google.ar.core.AugmentedImage
 import io.github.sceneview.ar.ArSceneView
-import io.github.sceneview.ar.node.ArModelNode
 import io.github.sceneview.ar.node.AugmentedImageNode
-import io.github.sceneview.ar.node.PlacementMode
-import io.github.sceneview.material.setExternalTexture
+import io.github.sceneview.node.VideoNode
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Rotation
-import io.github.sceneview.node.VideoNode
 
 class MainActivity : AppCompatActivity() {
-
+    
     private lateinit var sceneView: ArSceneView
-    lateinit var placeButton: ExtendedFloatingActionButton
-    private lateinit var modelNode: ArModelNode
     private lateinit var videoNode: VideoNode
-    private lateinit var mediaPlayer:MediaPlayer
-
-
+    private lateinit var mediaPlayer: MediaPlayer
+    private lateinit var placeButton: ExtendedFloatingActionButton
+    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        sceneView = findViewById<ArSceneView?>(R.id.sceneView).apply {
+        
+        sceneView = findViewById<ArSceneView>(R.id.sceneView).apply {
             this.lightEstimationMode = Config.LightEstimationMode.DISABLED
         }
-
-        mediaPlayer = MediaPlayer.create(this,R.raw.ad)
-
         placeButton = findViewById(R.id.place)
-
+        
         placeButton.setOnClickListener {
-            placeModel()
-        }
-
-        videoNode = VideoNode(sceneView.engine, scaleToUnits = 0.7f, centerOrigin = Position(y=-4f), glbFileLocation = "models/plane.glb", player = mediaPlayer, onLoaded = {_,_ ->
             mediaPlayer.start()
-        })
-
-        modelNode = ArModelNode(sceneView.engine,PlacementMode.INSTANT).apply {
-            loadModelGlbAsync(
-                glbFileLocation = "models/sofa.glb",
-                scaleToUnits = 1f,
-                centerOrigin = Position(-0.5f)
-
-            )
-            {
-                sceneView.planeRenderer.isVisible = true
-                val materialInstance = it.materialInstances[0]
-            }
-            onAnchorChanged = {
-                placeButton.isGone = it != null
-            }
-
         }
-        sceneView.addChild(modelNode)
-        modelNode.addChild(videoNode)
-
+        
+        // ✅ Load the target image from assets
+        val bitmap = BitmapFactory.decodeStream(assets.open("copy.jpg")) // Replace with your image file
+        
+        // ✅ Initialize MediaPlayer for video playback
+        mediaPlayer = MediaPlayer.create(this, R.raw.ad)
+        
+        // ✅ Create Augmented Image Node (Detects Target Photo Frame)
+        val imageNode = AugmentedImageNode(
+            engine = sceneView.engine,
+            imageName = "copy.jpg",  // Name should match the Augmented Image Database
+            bitmap = bitmap,             // Image to track
+            widthInMeters = 0.3f,        // Adjust based on the real-world size of the frame
+        ).apply {
+            onUpdate = { node, augmentedImage ->
+                if (augmentedImage.trackingMethod == AugmentedImage.TrackingMethod.FULL_TRACKING) {
+                    placeVideo(node,augmentedImage)
+                }
+            }
+            onError = { e->
+                Log.e("AugmentedImageNode", e.toString(), e)
+                mediaPlayer.pause()
+            }
+        }
+        
+        // ✅ Add image node to AR Scene
+        sceneView.addChild(imageNode)
     }
-
-   private fun placeModel(){
-       modelNode.anchor()
-
-       sceneView.planeRenderer.isVisible = false
-
-   }
-
+    
+    // ✅ Places the video on the detected photo frame
+    private fun placeVideo(imageNode: AugmentedImageNode, augmentedImage: AugmentedImage) {
+        if (!::videoNode.isInitialized) {
+            videoNode = VideoNode(
+                engine = sceneView.engine,
+                scaleToUnits = 0.5f, // Adjust size
+                centerOrigin = Position(y = 0f, x = 0f,z = 0f), // Adjust placement
+                glbFileLocation = "models/plane.glb", // Flat surface model for video
+                player = mediaPlayer,
+                onLoaded = { _, _ ->
+                    mediaPlayer.start()
+                }
+            )
+            
+            
+            imageNode.addChild(videoNode) // Attach video to the detected image frame
+        }
+    }
+    
     override fun onPause() {
         super.onPause()
-        mediaPlayer.stop()
+        mediaPlayer.pause()
     }
+    
     override fun onDestroy() {
         super.onDestroy()
         mediaPlayer.release()
     }
-
 }
